@@ -39,6 +39,69 @@ function getNodeBBox(node) {
             const approxW = textLen * fontSize * 0.6;
             return { x: node.x - approxW / 2, y: node.y - fontSize, w: approxW, h: fontSize + 4 };
         }
+        case 'tensor_block': {
+            const depth = node.depth || 20;
+            return {
+                x: node.x,
+                y: node.y - depth,
+                w: (node.width || 80) + depth,
+                h: (node.height || 60) + depth,
+            };
+        }
+        case 'waveform':
+            return {
+                x: node.x,
+                y: node.y - (node.amplitude || 12),
+                w: node.width || 120,
+                h: (node.height || 30) + (node.amplitude || 12) * 2,
+            };
+        case 'bracket': {
+            if (node.direction === 'vertical') {
+                return {
+                    x: node.x - 20,
+                    y: node.y,
+                    w: 40,
+                    h: node.height || 150,
+                };
+            }
+            return {
+                x: node.x,
+                y: node.y - (node.tick_height || 8),
+                w: node.width || 200,
+                h: (node.tick_height || 8) + 20,
+            };
+        }
+        case 'curved_arrow': {
+            if (!node.points || node.points.length < 2) return null;
+            let minPx = Infinity, minPy = Infinity, maxPx = 0, maxPy = 0;
+            for (const pt of node.points) {
+                minPx = Math.min(minPx, pt[0]);
+                minPy = Math.min(minPy, pt[1]);
+                maxPx = Math.max(maxPx, pt[0]);
+                maxPy = Math.max(maxPy, pt[1]);
+            }
+            return { x: minPx, y: minPy, w: maxPx - minPx, h: maxPy - minPy };
+        }
+        case 'side_annotation': {
+            const fontSize = node.font_size || 11;
+            const textLen = (node.text || '').length;
+            const approxW = textLen * fontSize * 0.6;
+            const minAx = Math.min(node.x, node.target_x || node.x);
+            const minAy = Math.min(node.y, node.target_y || node.y) - fontSize;
+            const maxAx = Math.max(node.x + approxW, node.target_x || node.x);
+            const maxAy = Math.max(node.y, node.target_y || node.y);
+            return { x: minAx, y: minAy, w: maxAx - minAx, h: maxAy - minAy + fontSize };
+        }
+        case 'vertical_label': {
+            const fs = node.font_size || 13;
+            const tLen = (node.text || '').length;
+            const approxH = tLen * fs * 0.6;
+            return { x: node.x - fs, y: node.y - approxH / 2, w: fs + 4, h: approxH };
+        }
+        case 'repeat_marker': {
+            const rfs = node.font_size || 13;
+            return { x: node.x - 10, y: node.y - rfs / 2, w: 30, h: rfs + 4 };
+        }
         case 'dots':
             return {
                 x: node.x - 4, y: node.y - 4,
@@ -62,7 +125,7 @@ function autoResizeCanvas(sg) {
     let minX = Infinity, minY = Infinity;
 
     for (const node of nodes) {
-        if (node.kind === 'arrow') {
+        if (node.kind === 'arrow' || node.kind === 'curved_arrow') {
             for (const pt of (node.points || [])) {
                 maxX = Math.max(maxX, pt[0]);
                 maxY = Math.max(maxY, pt[1]);
@@ -105,7 +168,7 @@ function shiftContentIntoMargins(sg, bounds) {
     if (shiftX === 0 && shiftY === 0) return;
 
     for (const node of nodes) {
-        if (node.kind === 'arrow') {
+        if (node.kind === 'arrow' || node.kind === 'curved_arrow') {
             if (node.points) {
                 node.points = node.points.map(pt => [
                     snap(pt[0] + shiftX),
@@ -131,7 +194,7 @@ function shiftContentIntoMargins(sg, bounds) {
 
 function gridSnapAll(nodes) {
     for (const node of nodes) {
-        if (node.kind === 'arrow') {
+        if (node.kind === 'arrow' || node.kind === 'curved_arrow') {
             if (node.points) {
                 node.points = node.points.map(pt => [snap(pt[0]), snap(pt[1])]);
             }
@@ -239,7 +302,7 @@ export function optimizeLayout(sceneGraph) {
     const sg = JSON.parse(JSON.stringify(sceneGraph)); // deep clone
     const nodes = sg.nodes || [];
 
-    if (nodes.length === 0) return sg;
+    if (nodes.length === 0 && !(sg.panels && sg.panels.length > 0)) return sg;
 
     // Step 1: Grid-snap all coordinates
     gridSnapAll(nodes);
@@ -249,6 +312,16 @@ export function optimizeLayout(sceneGraph) {
 
     // Step 3: Fix containers to enclose their children
     fixContainers(nodes);
+
+    // Process panel nodes too
+    if (sg.panels) {
+        for (const panel of sg.panels) {
+            const panelNodes = panel.nodes || [];
+            gridSnapAll(panelNodes);
+            lightAlign(panelNodes);
+            fixContainers(panelNodes);
+        }
+    }
 
     // Step 4: Auto-resize canvas to fit all content
     const bounds = autoResizeCanvas(sg);
