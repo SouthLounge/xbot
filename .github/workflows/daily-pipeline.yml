@@ -1,0 +1,74 @@
+name: Daily Figure Pipeline
+
+on:
+  schedule:
+    # Original posts: 2 PM UTC daily
+    - cron: '0 14 * * *'
+    # Reply mode: 6 PM UTC daily (after popular tweets have accumulated engagement)
+    - cron: '0 18 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Run mode'
+        required: false
+        default: 'post'
+        type: choice
+        options:
+          - post
+          - reply
+      test_limit:
+        description: 'Number of papers to process (for testing)'
+        required: false
+        default: ''
+
+jobs:
+  generate-and-post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Run pipeline
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          TWITTER_API_KEY: ${{ secrets.TWITTER_API_KEY }}
+          TWITTER_API_SECRET: ${{ secrets.TWITTER_API_SECRET }}
+          TWITTER_ACCESS_TOKEN: ${{ secrets.TWITTER_ACCESS_TOKEN }}
+          TWITTER_ACCESS_SECRET: ${{ secrets.TWITTER_ACCESS_SECRET }}
+        run: |
+          # Determine mode from input or schedule
+          MODE="${{ github.event.inputs.mode }}"
+          if [ -z "$MODE" ]; then
+            HOUR=$(date -u +%H)
+            if [ "$HOUR" = "18" ]; then
+              MODE="reply"
+            else
+              MODE="post"
+            fi
+          fi
+
+          if [ "$MODE" = "reply" ]; then
+            echo "Running reply mode..."
+            if [ -n "${{ github.event.inputs.test_limit }}" ]; then
+              node src/reply.js --test ${{ github.event.inputs.test_limit }}
+            else
+              node src/reply.js
+            fi
+          else
+            echo "Running post mode..."
+            if [ -n "${{ github.event.inputs.test_limit }}" ]; then
+              node src/index.js --test ${{ github.event.inputs.test_limit }}
+            else
+              node src/index.js
+            fi
+          fi
