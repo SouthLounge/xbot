@@ -6,13 +6,22 @@ const supabase = createClient(
 );
 
 export async function getExistingArxivIds(arxivIds) {
+    // Check for both plain IDs (legacy) and variant IDs (_v0, _v1)
+    const allIds = arxivIds.flatMap(id => [id, `${id}_v0`, `${id}_v1`]);
     const { data, error } = await supabase
         .from('figures')
         .select('arxiv_id')
-        .in('arxiv_id', arxivIds);
+        .in('arxiv_id', allIds);
 
     if (error) throw new Error(`Supabase query error: ${error.message}`);
-    return new Set(data.map(row => row.arxiv_id));
+
+    // Map variant IDs back to base IDs
+    const baseIds = new Set();
+    for (const row of data) {
+        const base = row.arxiv_id.replace(/_v\d+$/, '');
+        baseIds.add(base);
+    }
+    return baseIds;
 }
 
 export async function insertFigure(figure) {
@@ -47,6 +56,29 @@ export async function getRecentTweetIds(days = 30) {
 
     if (error) throw new Error(`Supabase query error: ${error.message}`);
     return data;
+}
+
+export async function uploadPng(arxivId, pngBuffer) {
+    const path = `${arxivId}.png`;
+    const { error } = await supabase.storage
+        .from('figures')
+        .upload(path, pngBuffer, {
+            contentType: 'image/png',
+            upsert: true,
+        });
+
+    if (error) throw new Error(`Storage upload error: ${error.message}`);
+
+    const { data } = supabase.storage.from('figures').getPublicUrl(path);
+    const publicUrl = data.publicUrl;
+
+    // Store URL in the figures table
+    await supabase
+        .from('figures')
+        .update({ png_url: publicUrl })
+        .eq('arxiv_id', arxivId);
+
+    return publicUrl;
 }
 
 export async function updateEngagement(arxivId, metrics) {
