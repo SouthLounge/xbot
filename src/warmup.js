@@ -145,14 +145,31 @@ async function notify(message) {
     }
 }
 
+function randInt(min, max) {
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
 async function run() {
+    // Random delay 0-90 minutes to avoid fixed-schedule bot pattern
+    const delayMin = randInt(0, 90);
+    console.log(`[warmup] Waiting ${delayMin} minutes before starting...`);
+    await sleep(delayMin * 60 * 1000);
+
     console.log(`[warmup] Starting warmup at ${new Date().toISOString()}`);
 
     const myId = await getMyId();
     console.log(`[warmup] Account ID: ${myId}`);
 
-    const followed = await followAccounts(myId, 5);
-    const liked = await likeTweets(10);
+    // Randomize counts each run
+    const followCount = randInt(2, 6);
+    const likeCount = randInt(5, 15);
+
+    const followed = await followAccounts(myId, followCount);
+
+    // Random pause between follows and likes (30s - 3min)
+    await sleep(randInt(30, 180) * 1000);
+
+    const liked = await likeTweets(likeCount);
 
     const summary = `Warmup complete: followed ${followed} accounts, liked ${liked} tweets`;
     console.log(`[warmup] ${summary}`);
