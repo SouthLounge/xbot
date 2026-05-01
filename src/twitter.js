@@ -15,7 +15,7 @@ function getClient() {
     return rwClient;
 }
 
-export async function postTweet(paperTitle, arxivId, pngBuffer) {
+export async function postTweet(commentary, arxivId, pngBuffer) {
     const client = getClient();
 
     // Upload media (uses v1.1 media upload endpoint)
@@ -23,16 +23,14 @@ export async function postTweet(paperTitle, arxivId, pngBuffer) {
         mimeType: 'image/png',
     });
 
-    // Build tweet text
+    // Build tweet: sarcastic take + arxiv link
     const arxivUrl = `arxiv.org/abs/${arxivId}`;
-    const hashtags = '#MachineLearning #AI #DeepLearning';
-    const overhead = arxivUrl.length + hashtags.length + 6; // newlines + spaces
-    const maxTitleLen = 280 - overhead;
-    const title = paperTitle.length > maxTitleLen
-        ? paperTitle.substring(0, maxTitleLen - 1) + '…'
-        : paperTitle;
+    const maxCommentLen = 280 - arxivUrl.length - 2; // 2 for \n\n
+    const comment = commentary.length > maxCommentLen
+        ? commentary.substring(0, maxCommentLen - 1) + '…'
+        : commentary;
 
-    const tweetText = `${title}\n\n${arxivUrl}\n${hashtags}`;
+    const tweetText = `${comment}\n\n${arxivUrl}`;
 
     // Post tweet with media (v2 endpoint)
     const tweet = await client.v2.tweet(tweetText, {

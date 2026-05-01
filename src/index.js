@@ -5,6 +5,7 @@ import { renderSceneGraph } from './renderer.js';
 import { svgToPng } from './png.js';
 import { getExistingArxivIds, insertFigure, updateTweetPosted } from './db.js';
 import { postTweet } from './twitter.js';
+import { generateCommentary } from './commentary.js';
 
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -127,6 +128,10 @@ async function run(testLimit = null, skipPosting = false, dateOverride = null) {
         try {
             console.log(`[xbot] Rendering and posting ${paper.arxivId}...`);
 
+            // Generate sarcastic commentary
+            const commentary = await generateCommentary(paper.title, paper.abstract);
+            console.log(`[xbot]   Take: ${commentary}`);
+
             // Render SVG string
             const svgString = renderSceneGraph(sceneGraph, 'dark');
 
@@ -134,7 +139,7 @@ async function run(testLimit = null, skipPosting = false, dateOverride = null) {
             const pngBuffer = svgToPng(svgString, 1600);
 
             // Post to Twitter
-            const tweetId = await postTweet(paper.title, paper.arxivId, pngBuffer);
+            const tweetId = await postTweet(commentary, paper.arxivId, pngBuffer);
 
             // Store tweet ID back to Supabase
             await updateTweetPosted(paper.arxivId, tweetId);
