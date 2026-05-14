@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { optimizeLayout } from './layout.js';
+import { applyBoxLayout } from './box-layout.js';
 
 const SYSTEM_PROMPT = `You are a scientific figure generator. Given a paper's title and abstract, you produce a JSON scene graph that describes a publication-quality architecture/pipeline diagram.
 
@@ -102,11 +103,67 @@ Each node has a "kind" field. Available kinds:
 { "kind": "dots", "x": 200, "y": 300, "direction": "vertical", "spacing": 8 }
 - Three dots indicating continuation. direction: "vertical" or "horizontal".
 
+### matrix_grid
+{ "kind": "matrix_grid", "values": [[0.87, 0.12], [0.00, 0.98]], "cell_width": 46, "cell_height": 30, "colormap": "viridis", "show_values": true, "value_precision": 2, "font_size": 9, "label": "Attention Weights", "color_min": 0.0, "color_max": 1.0 }
+- 2D grid of colored cells. Each cell colored by value using a colormap.
+- colormap: "viridis" (purple→green→yellow) or "coolwarm" (blue→white→red).
+- show_values: display numeric values in cells. value_precision: decimal places.
+- color_min/color_max: range for colormap mapping.
+- Use for: attention matrices, weight matrices, confusion matrices, probability tables, codebooks.
+
+### vector_block
+{ "kind": "vector_block", "values": [0.72, -0.31, 0.55, 0.88], "direction": "vertical", "cell_width": 50, "cell_height": 30, "colormap": "viridis", "show_values": true, "value_precision": 2, "label": "Embedding", "label_position": "bottom", "color_min": -1.0, "color_max": 1.0 }
+- 1D colored vector (vertical column or horizontal row).
+- direction: "vertical" (column) or "horizontal" (row).
+- label_position: "top" or "bottom" (default "bottom").
+- Use for: embeddings, latent vectors, softmax outputs, binary masks, feature vectors.
+- For binary masks, use colormap "coolwarm" with values of 0 and 1.
+
+## Layout Containers (hbox / vbox)
+
+Instead of manually specifying x,y coordinates, use layout containers.
+The layout engine automatically computes positions — no x,y needed on child nodes.
+
+### hbox — horizontal layout (left to right)
+{ "kind": "hbox", "gap": 15, "align": "middle", "padding": 10, "children": [...] }
+- gap: px between children (default 0). align: "top" | "middle" | "bottom" (default "top").
+- padding: px inside the container (default 0).
+
+### vbox — vertical layout (top to bottom)
+{ "kind": "vbox", "gap": 15, "align": "center", "padding": 10, "children": [...] }
+- align: "left" | "center" | "right" (default "left").
+
+### spacer — invisible gap for fine-tuning
+{ "kind": "spacer", "width": 30, "height": 0 }
+
+### Container Rules
+- Containers nest freely: hbox inside vbox inside hbox.
+- Arrows inside containers use "length" instead of "points": {"kind": "arrow", "length": 30}
+- Do NOT put x,y on nodes inside containers — the engine computes positions.
+- Top-level nodes outside containers can still use absolute x,y.
+- PREFER using hbox/vbox for all layouts. This prevents overlap and misalignment.
+
+### Container Example
+{ "kind": "hbox", "gap": 20, "align": "middle",
+  "children": [
+    {"kind": "rect", "width": 100, "height": 50, "label": "Encoder"},
+    {"kind": "arrow", "length": 30},
+    {"kind": "vector_block", "values": [0.5, -0.3, 0.8], "direction": "vertical", "cell_width": 40, "cell_height": 30, "colormap": "viridis", "label": "Latent"},
+    {"kind": "arrow", "length": 30},
+    {"kind": "rect", "width": 100, "height": 50, "label": "Decoder"}
+  ]
+}
+
 ## Design Principles
 
 1. Use 8-25 nodes total. Be selective — show the KEY architecture, not every detail.
-2. Use a grid-based layout: ~120px horizontal spacing, ~80px vertical spacing.
-3. Leave 40px margins on all sides.
+2. Use hbox/vbox containers for layout. Let the engine handle spacing — do NOT manually specify x,y inside containers.
+3. Choose the right visual metaphor for the paper:
+   - Quantization, attention, embeddings, codebooks → matrix_grid + vector_block with colormaps
+   - Encoder-decoder, pipelines → trapezoid + rect inside hbox containers
+   - Signal processing, audio, speech → waveform + vector_block
+   - Multi-path architectures (e.g., parallel streams) → nested hbox inside vbox
+   - Default: rect/arrow flowchart is fine, but wrap in hbox/vbox for proper alignment
 4. Use trapezoids for encoder/decoder pairs (down=encoder, up=decoder).
 5. Use stacked_blocks for multi-layer modules (transformer blocks, ResNet stages).
 6. Use tensor_blocks for feature maps, embeddings, and data tensors — they add visual depth.
@@ -170,6 +227,14 @@ export async function generateFigure(paper) {
         } else {
             throw new Error('Failed to parse scene graph JSON from Claude response');
         }
+    }
+
+    // Resolve hbox/vbox containers into flat positioned nodes
+    const hasBoxLayout = (sceneGraph.nodes || []).some(
+        n => n.kind === 'hbox' || n.kind === 'vbox'
+    );
+    if (hasBoxLayout) {
+        sceneGraph = applyBoxLayout(sceneGraph, 'dark');
     }
 
     const optimized = optimizeLayout(sceneGraph);

@@ -108,6 +108,24 @@ export function getNodeBBox(node) {
                 w: node.direction === 'horizontal' ? (node.spacing || 8) * 2 + 8 : 8,
                 h: node.direction === 'vertical' ? (node.spacing || 8) * 2 + 8 : 8,
             };
+        case 'matrix_grid': {
+            const vals = node.values || [[]];
+            const rows = vals.length;
+            const cols = (vals[0] || []).length;
+            const cw = node.cell_width || 45;
+            const ch = node.cell_height || 30;
+            return { x: node.x, y: node.y, w: cols * cw, h: rows * ch + 20 };
+        }
+        case 'vector_block': {
+            const vvals = node.values || [];
+            const dir = node.direction || 'vertical';
+            const vcw = node.cell_width || 50;
+            const vch = node.cell_height || 30;
+            if (dir === 'horizontal') {
+                return { x: node.x, y: node.y, w: vvals.length * vcw, h: vch + 20 };
+            }
+            return { x: node.x, y: node.y, w: vcw, h: vvals.length * vch + 20 };
+        }
         default:
             return null;
     }

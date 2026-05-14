@@ -124,6 +124,78 @@ function uid(prefix) {
     return `${prefix}-${++_idCounter}`;
 }
 
+// ---- Colormap Utilities ----
+
+// Viridis colormap: 9 anchor points, linearly interpolated
+const VIRIDIS_STOPS = [
+    [68, 1, 84],     // 0.000 — dark purple
+    [72, 36, 117],   // 0.125
+    [64, 67, 135],   // 0.250
+    [52, 94, 141],   // 0.375
+    [33, 145, 140],  // 0.500 — teal
+    [53, 183, 121],  // 0.625
+    [109, 205, 89],  // 0.750
+    [180, 222, 44],  // 0.875
+    [253, 231, 37],  // 1.000 — yellow
+];
+
+const COOLWARM_STOPS = [
+    [59, 76, 192],   // 0.000 — blue
+    [98, 130, 234],  // 0.250
+    [184, 199, 232], // 0.375
+    [235, 235, 235], // 0.500 — white/neutral
+    [230, 185, 173], // 0.625
+    [214, 96, 77],   // 0.750
+    [180, 4, 38],    // 1.000 — red
+];
+
+function interpolateColormap(stops, t) {
+    t = Math.max(0, Math.min(1, t));
+    const n = stops.length - 1;
+    const idx = t * n;
+    const lo = Math.floor(idx);
+    const hi = Math.min(lo + 1, n);
+    const frac = idx - lo;
+    const r = Math.round(stops[lo][0] + (stops[hi][0] - stops[lo][0]) * frac);
+    const g = Math.round(stops[lo][1] + (stops[hi][1] - stops[lo][1]) * frac);
+    const b = Math.round(stops[lo][2] + (stops[hi][2] - stops[lo][2]) * frac);
+    return `rgb(${r},${g},${b})`;
+}
+
+function colormapColor(value, min, max, colormap) {
+    const t = max === min ? 0.5 : (value - min) / (max - min);
+    const stops = colormap === 'coolwarm' ? COOLWARM_STOPS : VIRIDIS_STOPS;
+    return interpolateColormap(stops, t);
+}
+
+// Returns white or black text depending on background luminance
+function contrastTextColor(value, min, max, colormap) {
+    const t = max === min ? 0.5 : (value - min) / (max - min);
+    const stops = colormap === 'coolwarm' ? COOLWARM_STOPS : VIRIDIS_STOPS;
+    const n = stops.length - 1;
+    const idx = t * n;
+    const lo = Math.floor(idx);
+    const hi = Math.min(lo + 1, n);
+    const frac = idx - lo;
+    const r = stops[lo][0] + (stops[hi][0] - stops[lo][0]) * frac;
+    const g = stops[lo][1] + (stops[hi][1] - stops[lo][1]) * frac;
+    const b = stops[lo][2] + (stops[hi][2] - stops[lo][2]) * frac;
+    const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    return luminance > 0.5 ? '#000000' : '#ffffff';
+}
+
+function matrixMinMax(values) {
+    let min = Infinity, max = -Infinity;
+    for (const row of values) {
+        if (Array.isArray(row)) {
+            for (const v of row) { min = Math.min(min, v); max = Math.max(max, v); }
+        } else {
+            min = Math.min(min, row); max = Math.max(max, row);
+        }
+    }
+    return { min, max };
+}
+
 // ---- Render Functions ----
 // Each returns an SVG string fragment (a <g> group or element).
 
@@ -998,6 +1070,195 @@ function renderRepeatMarker(node, style) {
     }, `\u00d7${n}`);
 }
 
+function renderMatrixGrid(node, style) {
+    const x = node.x || 0;
+    const y = node.y || 0;
+    const values = node.values || [[]];
+    const rows = values.length;
+    const cols = values[0].length;
+    const cellW = node.cell_width || 45;
+    const cellH = node.cell_height || 30;
+    const colormap = node.colormap || 'viridis';
+    const showValues = node.show_values !== false;
+    const stroke = node.stroke || style.nodeStroke;
+    const sw = node.stroke_width || 0.5;
+    const fontSize = node.font_size || style.smallFontSize;
+
+    // Compute global min/max for colormap normalization
+    const { min, max } = node.color_min != null && node.color_max != null
+        ? { min: node.color_min, max: node.color_max }
+        : matrixMinMax(values);
+
+    const parts = [];
+
+    for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+            const val = values[r][c];
+            const cx = x + c * cellW;
+            const cy = y + r * cellH;
+            const fill = colormapColor(val, min, max, colormap);
+
+            parts.push(
+                svgEl('rect', {
+                    x: cx, y: cy, width: cellW, height: cellH,
+                    fill,
+                    stroke,
+                    'stroke-width': sw,
+                })
+            );
+
+            if (showValues) {
+                const textColor = contrastTextColor(val, min, max, colormap);
+                const formatted = typeof node.value_precision === 'number'
+                    ? val.toFixed(node.value_precision)
+                    : val.toFixed(2);
+                parts.push(
+                    textEl('text', {
+                        x: cx + cellW / 2,
+                        y: cy + cellH / 2 + fontSize * 0.35,
+                        'text-anchor': 'middle',
+                        'font-family': style.monoFont,
+                        'font-size': fontSize,
+                        fill: textColor,
+                    }, formatted)
+                );
+            }
+        }
+    }
+
+    // Row headers (left side)
+    if (node.row_headers) {
+        for (let r = 0; r < node.row_headers.length && r < rows; r++) {
+            parts.push(
+                textEl('text', {
+                    x: x - 6,
+                    y: y + r * cellH + cellH / 2 + fontSize * 0.35,
+                    'text-anchor': 'end',
+                    'font-family': style.monoFont,
+                    'font-size': fontSize,
+                    fill: style.textColor,
+                }, String(node.row_headers[r]))
+            );
+        }
+    }
+
+    // Column headers (top)
+    if (node.col_headers) {
+        for (let c = 0; c < node.col_headers.length && c < cols; c++) {
+            parts.push(
+                textEl('text', {
+                    x: x + c * cellW + cellW / 2,
+                    y: y - 6,
+                    'text-anchor': 'middle',
+                    'font-family': style.monoFont,
+                    'font-size': fontSize,
+                    fill: style.textColor,
+                }, String(node.col_headers[c]))
+            );
+        }
+    }
+
+    // Label
+    if (node.label) {
+        const labelPos = node.label_position || 'bottom';
+        const lx = x + (cols * cellW) / 2;
+        const ly = labelPos === 'top' ? y - 18 : y + rows * cellH + 16;
+        parts.push(
+            textEl('text', {
+                x: lx,
+                y: ly,
+                'text-anchor': 'middle',
+                'font-family': style.fontFamily,
+                'font-size': style.fontSize,
+                fill: style.textColor,
+                'font-weight': 'bold',
+            }, node.label)
+        );
+    }
+
+    return svgEl('g', { class: 'node-matrix-grid' }, ...parts);
+}
+
+function renderVectorBlock(node, style) {
+    const x = node.x || 0;
+    const y = node.y || 0;
+    const values = node.values || [];
+    const direction = node.direction || 'vertical';
+    const cellW = node.cell_width || 50;
+    const cellH = node.cell_height || 30;
+    const colormap = node.colormap || 'viridis';
+    const showValues = node.show_values !== false;
+    const stroke = node.stroke || style.nodeStroke;
+    const sw = node.stroke_width || 0.5;
+    const fontSize = node.font_size || style.smallFontSize;
+
+    const { min, max } = node.color_min != null && node.color_max != null
+        ? { min: node.color_min, max: node.color_max }
+        : matrixMinMax(values);
+
+    const parts = [];
+
+    for (let i = 0; i < values.length; i++) {
+        const val = values[i];
+        const cx = direction === 'horizontal' ? x + i * cellW : x;
+        const cy = direction === 'vertical' ? y + i * cellH : y;
+        const fill = colormapColor(val, min, max, colormap);
+
+        parts.push(
+            svgEl('rect', {
+                x: cx, y: cy, width: cellW, height: cellH,
+                fill,
+                stroke,
+                'stroke-width': sw,
+            })
+        );
+
+        if (showValues) {
+            const textColor = contrastTextColor(val, min, max, colormap);
+            const formatted = typeof node.value_precision === 'number'
+                ? val.toFixed(node.value_precision)
+                : val.toFixed(2);
+            parts.push(
+                textEl('text', {
+                    x: cx + cellW / 2,
+                    y: cy + cellH / 2 + fontSize * 0.35,
+                    'text-anchor': 'middle',
+                    'font-family': style.monoFont,
+                    'font-size': fontSize,
+                    fill: textColor,
+                }, formatted)
+            );
+        }
+    }
+
+    // Label
+    if (node.label) {
+        const labelPos = node.label_position || 'bottom';
+        let lx, ly;
+        if (direction === 'vertical') {
+            lx = x + cellW / 2;
+            ly = labelPos === 'top' ? y - 10 : y + values.length * cellH + 16;
+        } else {
+            lx = x + (values.length * cellW) / 2;
+            ly = labelPos === 'top' ? y - 10 : y + cellH + 16;
+        }
+        parts.push(
+            textEl('text', {
+                x: lx,
+                y: ly,
+                'text-anchor': 'middle',
+                'font-family': style.fontFamily,
+                'font-size': style.fontSize,
+                fill: style.textColor,
+                'font-weight': node.label_bold !== false ? 'bold' : 'normal',
+                'font-style': node.label_italic ? 'italic' : 'normal',
+            }, node.label)
+        );
+    }
+
+    return svgEl('g', { class: 'node-vector-block' }, ...parts);
+}
+
 // ---- Render Dispatch Table ----
 
 const RENDERERS = {
@@ -1016,6 +1277,8 @@ const RENDERERS = {
     side_annotation: renderSideAnnotation,
     vertical_label: renderVerticalLabel,
     repeat_marker: renderRepeatMarker,
+    matrix_grid: renderMatrixGrid,
+    vector_block: renderVectorBlock,
 };
 
 // ---- Composite Rendering ----
