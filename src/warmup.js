@@ -161,8 +161,8 @@ async function run() {
     console.log(`[warmup] Account ID: ${myId}`);
 
     // Randomize counts each run
-    const followCount = randInt(2, 6);
-    const likeCount = randInt(5, 15);
+    const followCount = randInt(1, 3);
+    const likeCount = randInt(3, 5);
 
     const followed = await followAccounts(myId, followCount);
 
