@@ -230,9 +230,9 @@ export async function generateFigure(paper) {
     }
 
     // Resolve hbox/vbox containers into flat positioned nodes
-    const hasBoxLayout = (sceneGraph.nodes || []).some(
-        n => n.kind === 'hbox' || n.kind === 'vbox'
-    );
+    const isBoxNode = n => n.kind === 'hbox' || n.kind === 'vbox';
+    const hasBoxLayout = (sceneGraph.nodes || []).some(isBoxNode) ||
+        (sceneGraph.panels || []).some(p => (p.nodes || []).some(isBoxNode));
     if (hasBoxLayout) {
         sceneGraph = applyBoxLayout(sceneGraph, 'dark');
     }
