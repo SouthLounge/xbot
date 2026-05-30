@@ -388,30 +388,6 @@ export function applyBoxLayout(sceneGraph, styleName) {
 
     sg.nodes = newNodes;
 
-    // Process panels too
-    if (sg.panels) {
-        for (const panel of sg.panels) {
-            const panelNodes = [];
-            const panelMargin = 15;
-            let panelCursorY = panelMargin;
-
-            for (const node of (panel.nodes || [])) {
-                if (node.kind === 'hbox' || node.kind === 'vbox') {
-                    const startX = node.x != null ? node.x : panelMargin;
-                    const startY = node.y != null ? node.y : panelCursorY;
-                    const size = measureNode(node, style);
-                    placeNode(node, style, startX, startY);
-                    panelNodes.push(...flattenNode(node));
-                    panelCursorY = startY + size.height + 15;
-                } else {
-                    panelNodes.push(node);
-                }
-            }
-
-            panel.nodes = panelNodes;
-        }
-    }
-
     // Auto-size canvas to fit content
     let maxX = 0, maxY = 0;
     for (const node of sg.nodes) {
