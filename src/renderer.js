@@ -998,6 +998,157 @@ function renderRepeatMarker(node, style) {
     }, `\u00d7${n}`);
 }
 
+// ---- Colormap Utilities ----
+
+const VIRIDIS_STOPS = [
+    [68, 1, 84], [72, 36, 117], [64, 67, 135], [52, 94, 141],
+    [33, 145, 140], [53, 183, 121], [109, 205, 89], [180, 222, 44], [253, 231, 37],
+];
+const COOLWARM_STOPS = [
+    [59, 76, 192], [98, 130, 234], [184, 199, 232], [235, 235, 235],
+    [230, 185, 173], [214, 96, 77], [180, 4, 38],
+];
+
+function interpolateColormap(stops, t) {
+    t = Math.max(0, Math.min(1, t));
+    const n = stops.length - 1;
+    const idx = t * n;
+    const lo = Math.floor(idx);
+    const hi = Math.min(lo + 1, n);
+    const frac = idx - lo;
+    const r = Math.round(stops[lo][0] + (stops[hi][0] - stops[lo][0]) * frac);
+    const g = Math.round(stops[lo][1] + (stops[hi][1] - stops[lo][1]) * frac);
+    const b = Math.round(stops[lo][2] + (stops[hi][2] - stops[lo][2]) * frac);
+    return `rgb(${r},${g},${b})`;
+}
+
+function colormapColor(value, min, max, colormap) {
+    const t = max === min ? 0.5 : (value - min) / (max - min);
+    const stops = colormap === 'coolwarm' ? COOLWARM_STOPS : VIRIDIS_STOPS;
+    return interpolateColormap(stops, t);
+}
+
+function contrastTextColor(value, min, max, colormap) {
+    const t = max === min ? 0.5 : (value - min) / (max - min);
+    if (colormap === 'coolwarm') return t > 0.3 && t < 0.7 ? '#222' : '#fff';
+    return t > 0.55 ? '#111' : '#fff';
+}
+
+function matrixMinMax(values) {
+    let min = Infinity, max = -Infinity;
+    for (const row of values) {
+        for (const v of (Array.isArray(row) ? row : [row])) {
+            if (v < min) min = v;
+            if (v > max) max = v;
+        }
+    }
+    return { min, max };
+}
+
+// ---- Matrix Grid Renderer ----
+
+function renderMatrixGrid(node, style) {
+    const x = node.x || 0;
+    const y = node.y || 0;
+    const values = node.values || [[]];
+    const rows = values.length;
+    const cols = (values[0] || []).length;
+    const cw = node.cell_width || 45;
+    const ch = node.cell_height || 30;
+    const colormap = node.colormap || 'viridis';
+    const showValues = node.show_values !== false;
+    const precision = node.value_precision != null ? node.value_precision : 2;
+    const fontSize = node.font_size || 10;
+    const cmin = node.color_min != null ? node.color_min : matrixMinMax(values).min;
+    const cmax = node.color_max != null ? node.color_max : matrixMinMax(values).max;
+
+    const parts = [];
+    for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+            const v = values[r][c];
+            const cx = x + c * cw;
+            const cy = y + r * ch;
+            const fill = colormapColor(v, cmin, cmax, colormap);
+            const textFill = contrastTextColor(v, cmin, cmax, colormap);
+            parts.push(svgEl('rect', { x: cx, y: cy, width: cw, height: ch, fill, stroke: 'rgba(0,0,0,0.15)', 'stroke-width': 0.5 }));
+            if (showValues) {
+                parts.push(textEl('text', {
+                    x: cx + cw / 2, y: cy + ch / 2 + fontSize * 0.35,
+                    'text-anchor': 'middle', 'font-family': style.monoFont,
+                    'font-size': fontSize, fill: textFill,
+                }, v.toFixed(precision)));
+            }
+        }
+    }
+    // Label below
+    if (node.label) {
+        parts.push(textEl('text', {
+            x: x + (cols * cw) / 2, y: y + rows * ch + 16,
+            'text-anchor': 'middle', 'font-family': style.fontFamily,
+            'font-size': 12, fill: style.labelColor, 'font-weight': 'bold',
+        }, node.label));
+    }
+    return svgEl('g', {}, ...parts);
+}
+
+// ---- Vector Block Renderer ----
+
+function renderVectorBlock(node, style) {
+    const x = node.x || 0;
+    const y = node.y || 0;
+    const values = node.values || [];
+    const dir = node.direction || 'vertical';
+    const cw = node.cell_width || 50;
+    const ch = node.cell_height || 30;
+    const colormap = node.colormap || 'viridis';
+    const showValues = node.show_values !== false;
+    const precision = node.value_precision != null ? node.value_precision : 2;
+    const fontSize = node.font_size || 10;
+    const cmin = node.color_min != null ? node.color_min : matrixMinMax([values]).min;
+    const cmax = node.color_max != null ? node.color_max : matrixMinMax([values]).max;
+    const labelPos = node.label_position || 'bottom';
+
+    const parts = [];
+
+    // Label on top if requested
+    if (node.label && labelPos === 'top') {
+        parts.push(textEl('text', {
+            x: dir === 'horizontal' ? x + (values.length * cw) / 2 : x + cw / 2,
+            y: y - 6,
+            'text-anchor': 'middle', 'font-family': style.fontFamily,
+            'font-size': 11, fill: style.labelColor, 'font-style': 'italic',
+        }, node.label));
+    }
+
+    for (let i = 0; i < values.length; i++) {
+        const v = values[i];
+        const cx = dir === 'horizontal' ? x + i * cw : x;
+        const cy = dir === 'horizontal' ? y : y + i * ch;
+        const fill = colormapColor(v, cmin, cmax, colormap);
+        const textFill = contrastTextColor(v, cmin, cmax, colormap);
+        parts.push(svgEl('rect', { x: cx, y: cy, width: cw, height: ch, fill, stroke: 'rgba(0,0,0,0.15)', 'stroke-width': 0.5 }));
+        if (showValues) {
+            parts.push(textEl('text', {
+                x: cx + cw / 2, y: cy + ch / 2 + fontSize * 0.35,
+                'text-anchor': 'middle', 'font-family': style.monoFont,
+                'font-size': fontSize, fill: textFill,
+            }, v.toFixed(precision)));
+        }
+    }
+
+    // Label on bottom (default)
+    if (node.label && labelPos !== 'top') {
+        const lx = dir === 'horizontal' ? x + (values.length * cw) / 2 : x + cw / 2;
+        const ly = dir === 'horizontal' ? y + ch + 14 : y + values.length * ch + 14;
+        parts.push(textEl('text', {
+            x: lx, y: ly,
+            'text-anchor': 'middle', 'font-family': style.fontFamily,
+            'font-size': 11, fill: style.labelColor, 'font-style': 'italic',
+        }, node.label));
+    }
+    return svgEl('g', {}, ...parts);
+}
+
 // ---- Render Dispatch Table ----
 
 const RENDERERS = {
@@ -1016,6 +1167,8 @@ const RENDERERS = {
     side_annotation: renderSideAnnotation,
     vertical_label: renderVerticalLabel,
     repeat_marker: renderRepeatMarker,
+    matrix_grid: renderMatrixGrid,
+    vector_block: renderVectorBlock,
 };
 
 // ---- Composite Rendering ----

@@ -1,146 +1,155 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { optimizeLayout } from './layout.js';
+import { applyBoxLayout } from './box-layout.js';
 
-const SYSTEM_PROMPT = `You are a scientific figure generator. Given a paper's title and abstract, you produce a JSON scene graph that describes a publication-quality architecture/pipeline diagram.
+const SYSTEM_PROMPT = `You are a scientific figure generator. Given a paper's title and abstract, you produce a JSON scene graph that describes a publication-quality architecture diagram.
 
 ## JSON Schema
 
 Return ONLY valid JSON (no markdown, no code fences) with this structure:
 
 {
-  "width": 800,        // canvas width in px (600-1200)
-  "height": 500,       // canvas height in px (400-800)
-  "title": "...",       // figure title (short)
-  "caption": "...",     // optional figure caption (1 sentence)
-  "nodes": [...],       // array of node objects (top-level)
-  "panels": [...]       // optional array of sub-panels for multi-part figures
+  "title": "...",
+  "caption": "...",
+  "nodes": [
+    {
+      "kind": "vbox", "gap": 20, "align": "center", "padding": 15,
+      "children": [ ...all figure content here... ]
+    }
+  ]
 }
 
-### Panels (hierarchical composition)
-For complex architectures, use panels to create multi-part figures like "(a) Overview (b) Detail":
-{ "panels": [
-  { "x": 0, "y": 60, "width": 500, "height": 400, "label": "(a) Overall Architecture", "nodes": [...] },
-  { "x": 520, "y": 60, "width": 350, "height": 400, "label": "(b) Attention Detail", "nodes": [...] }
-]}
-- Each panel has its own coordinate space (nodes inside use coordinates relative to panel origin).
-- Panel labels appear above the panel area.
-- Use panels when the paper has a main pipeline + detailed sub-module, or multiple distinct stages.
-- Top-level "nodes" can coexist with panels (e.g., for connecting arrows between panels).
+The top-level "nodes" array should contain ONE root vbox (or hbox) that holds the entire figure. The layout engine computes all positions automatically — do NOT put x,y on any node inside containers.
+
+## Layout Containers
+
+### hbox — horizontal layout (left to right)
+{ "kind": "hbox", "gap": 15, "align": "middle", "children": [...] }
+- gap: px between children (default 0). align: "top" | "middle" | "bottom".
+- padding: px inside edges (default 0).
+
+### vbox — vertical layout (top to bottom)
+{ "kind": "vbox", "gap": 15, "align": "center", "children": [...] }
+- align: "left" | "center" | "right".
+
+### spacer — invisible gap
+{ "kind": "spacer", "width": 30, "height": 0 }
+
+### Container rules
+- Containers nest: hbox inside vbox inside hbox, etc.
+- Arrows inside containers use "length" not "points": {"kind": "arrow", "length": 30}
+- Do NOT put x,y on any node inside a container.
+- Use hbox for side-by-side elements, vbox for top-to-bottom flow.
 
 ## Node Types
 
-Each node has a "kind" field. Available kinds:
-
 ### rect
-{ "kind": "rect", "x": 100, "y": 100, "width": 120, "height": 50, "rx": 4, "label": "Module Name", "type_label": "ENCODER", "sublabel": "(optional detail)", "fill": null, "stroke": null, "bold": false }
+{ "kind": "rect", "width": 120, "height": 50, "rx": 4, "label": "Module Name", "type_label": "ENCODER", "sublabel": "(detail)", "fill": null }
 
 ### trapezoid
-{ "kind": "trapezoid", "x": 100, "y": 100, "width": 120, "height": 55, "top_width": 72, "direction": "down", "label": "Encoder", "fill": null }
-- direction: "down" = wider at bottom (encoder), "up" = wider at top (decoder)
-- top_width: width of the top edge (bottom is always full width)
+{ "kind": "trapezoid", "width": 120, "height": 55, "top_width": 72, "direction": "down", "label": "Encoder" }
+- direction: "down" = wider at bottom (encoder), "up" = wider at top (decoder).
 
 ### stacked_block
-{ "kind": "stacked_block", "x": 100, "y": 100, "width": 130, "layers": [{"label": "Layer 1"}, {"label": "Layer 2"}, {"label": "Layer 3"}], "layer_height": 36, "gap": 2, "label": "Block Name", "label_position": "bottom", "show_border": true }
+{ "kind": "stacked_block", "width": 130, "layers": [{"label": "Layer 1"}, {"label": "Layer 2"}], "layer_height": 36, "gap": 2, "label": "Block Name" }
 
 ### circle_op
-{ "kind": "circle_op", "x": 300, "y": 200, "r": 18, "symbol": "⊕", "label": "Add" }
-- symbol: "⊕" (add), "⊙" (hadamard), "×" (multiply), "σ" (sigmoid), "+" (sum), "·" (dot)
+{ "kind": "circle_op", "r": 18, "symbol": "⊕" }
+- symbol: "⊕" (add), "⊙" (hadamard), "×" (multiply), "σ" (sigmoid)
 
 ### tensor_block
-{ "kind": "tensor_block", "x": 100, "y": 100, "width": 80, "height": 60, "depth": 20, "label": "Feature Map", "dim_top": "C", "dim_right": "H", "dim_bottom": "W", "fill": null }
-- 3D rectangular prism representing a tensor/feature map.
-- depth: visual depth offset for 3D effect (10-30px).
-- dim_top/dim_right/dim_bottom: optional dimension labels on edges.
-- Use for CNN feature maps, embedding tensors, attention matrices.
+{ "kind": "tensor_block", "width": 80, "height": 60, "depth": 20, "label": "Feature Map", "dim_top": "C", "dim_right": "H" }
+- 3D prism for tensors/feature maps.
 
 ### waveform
-{ "kind": "waveform", "x": 100, "y": 200, "width": 120, "height": 30, "periods": 3, "amplitude": 12, "label": "Audio Signal", "fill": null }
-- Sinusoidal waveform for representing signals, audio, time-series data.
-- periods: number of wave cycles. amplitude: wave height in px.
+{ "kind": "waveform", "width": 120, "height": 30, "periods": 3, "amplitude": 12, "label": "Audio Signal" }
 
-### bracket
-{ "kind": "bracket", "x": 100, "y": 100, "width": 200, "direction": "horizontal", "label": "Shared Weights", "tick_height": 8, "arrow": false }
-{ "kind": "bracket", "x": 50, "y": 100, "height": 150, "direction": "vertical", "label": "Encoder", "side": "left" }
-- Horizontal: spanning bracket with optional ticks and arrows at ends.
-- Vertical: curly brace along the side of a group. side: "left" or "right".
+### matrix_grid
+{ "kind": "matrix_grid", "values": [[0.87, 0.12], [0.00, 0.98]], "cell_width": 46, "cell_height": 30, "colormap": "viridis", "show_values": true, "value_precision": 2, "font_size": 9, "label": "Attention Weights", "color_min": 0.0, "color_max": 1.0 }
+- 2D grid of colored cells. Each cell colored by value using a colormap.
+- colormap: "viridis" (purple→green→yellow) or "coolwarm" (blue→white→red).
+- Use for: attention matrices, weight matrices, confusion matrices, codebooks.
 
-### curved_arrow
-{ "kind": "curved_arrow", "points": [[x1,y1], [x2,y2]], "curve": 0.3, "dashed": false, "label": "skip connection", "color": null }
-{ "kind": "curved_arrow", "points": [[x1,y1], [cx,cy], [x2,y2]], "dashed": false, "label": "residual" }
-- 2 points: auto-generates quadratic bezier with curve factor (0.1-0.5, default 0.3).
-- 3 points: explicit quadratic bezier [start, control, end].
-- 4 points: explicit cubic bezier [start, cp1, cp2, end].
-- Use for skip connections, residual paths, feedback loops.
-
-### side_annotation
-{ "kind": "side_annotation", "x": 400, "y": 150, "text": "Frozen", "target_x": 350, "target_y": 150, "font_size": 11 }
-- Text label with a dashed leader line pointing to a target coordinate.
-- Use for annotating specific parts of the diagram (e.g., "Frozen", "Pretrained", "×N").
-
-### vertical_label
-{ "kind": "vertical_label", "x": 30, "y": 200, "text": "Encoder", "font_size": 13, "bold": true }
-- Text rotated -90° for labeling vertical spans (e.g., side labels like "Encoder", "Decoder").
-
-### repeat_marker
-{ "kind": "repeat_marker", "x": 200, "y": 180, "count": 6, "font_size": 13 }
-- Displays "×N" annotation (e.g., "×6") for indicating repeated blocks.
-- Place near a stacked_block or rect to show repetition count.
+### vector_block
+{ "kind": "vector_block", "values": [0.72, -0.31, 0.55, 0.88], "direction": "vertical", "cell_width": 50, "cell_height": 30, "colormap": "viridis", "show_values": true, "value_precision": 2, "label": "Embedding", "label_position": "bottom", "color_min": -1.0, "color_max": 1.0 }
+- 1D colored vector (vertical column or horizontal row).
+- direction: "vertical" or "horizontal". label_position: "top" or "bottom".
+- Use for: embeddings, latent vectors, softmax outputs, binary masks, feature vectors.
 
 ### arrow
-{ "kind": "arrow", "points": [[x1,y1], [x2,y2], ...], "dashed": false, "label": "data flow", "label_offset_x": 8, "label_offset_y": -6, "color": null }
-- points: array of [x,y] coordinate pairs. Arrow goes from first to last point.
-- Use intermediate points for bends/routing.
-
-### container
-{ "kind": "container", "x": 50, "y": 50, "width": 200, "height": 300, "label": "Module Group", "label_position": "top", "dash_pattern": "6,4" }
-- Dashed border rectangle to group related nodes.
+{ "kind": "arrow", "length": 30 }
+- Inside containers, use "length" only. The engine generates points automatically.
 
 ### text_label
-{ "kind": "text_label", "x": 400, "y": 480, "text": "L = L_recon + αL_kl", "anchor": "middle", "mono": true, "font_size": 12, "bold": false, "italic": true }
+{ "kind": "text_label", "text": "Section Title", "font_size": 12, "bold": true, "italic": false }
 
 ### dots
-{ "kind": "dots", "x": 200, "y": 300, "direction": "vertical", "spacing": 8 }
-- Three dots indicating continuation. direction: "vertical" or "horizontal".
+{ "kind": "dots", "direction": "vertical", "spacing": 8 }
+
+### container
+{ "kind": "container", "width": 200, "height": 300, "label": "Module Group" }
 
 ## Design Principles
 
-1. Use 8-25 nodes total. Be selective — show the KEY architecture, not every detail.
-2. Use a grid-based layout: ~120px horizontal spacing, ~80px vertical spacing.
-3. Leave 40px margins on all sides.
+1. Use 8-25 leaf nodes total. Be selective — show the KEY architecture, not every detail.
+2. Use hbox/vbox containers for ALL layout. Do NOT manually specify x,y coordinates.
+3. Choose the right visual metaphor for the paper:
+   - Quantization, attention, embeddings, codebooks → matrix_grid + vector_block with colormaps
+   - Encoder-decoder, pipelines → trapezoid + rect inside hbox
+   - Signal processing, audio, speech → waveform + vector_block
+   - Multi-path architectures → nested hbox inside vbox
+   - Default: rect/arrow flowchart wrapped in vbox
 4. Use trapezoids for encoder/decoder pairs (down=encoder, up=decoder).
 5. Use stacked_blocks for multi-layer modules (transformer blocks, ResNet stages).
-6. Use tensor_blocks for feature maps, embeddings, and data tensors — they add visual depth.
+6. Use tensor_blocks for feature maps and data tensors — they add visual depth.
 7. Use circle_op for mathematical operations (attention, addition, gating).
-8. Use containers to group related components.
-9. Use curved_arrow for skip connections and residual paths instead of complex multi-point arrows.
-10. Use repeat_marker (×N) next to blocks that are repeated, instead of drawing N copies.
-11. Use vertical_label on the left/right side to label major architectural sections.
-12. Use brackets to show shared weights or span annotations across multiple blocks.
-13. Arrows should connect outputs to inputs. Route around nodes when needed.
-14. Keep labels short (1-3 words). Use type_label for category, sublabel for detail.
-15. The figure should tell the paper's story at a glance.
-16. For fill/stroke/color: use null to inherit from the style theme. Only override if semantically important (e.g., different colors for different modalities).
-17. Make arrow points connect to node edges, not centers. Account for node dimensions.
-18. For complex papers with overview + detail views, use the panels system to create multi-part figures.
+8. Keep labels short (1-3 words). Use type_label for category.
+9. The figure should tell the paper's story at a glance.
+10. For fill/stroke/color: use null to inherit from the style theme. Only override if semantically important.
 
-## Composition Depth
+## Example: Encoder-Decoder with Latent Vector
 
-Assess the paper's architectural depth and choose the appropriate figure complexity:
-
-**1-layer (flat)**: The paper describes a simple pipeline with no novel sub-modules. Produce a single flat figure with no panels. This is fine — it honestly reflects a straightforward contribution.
-
-**2-layer (panels)**: The paper has a main pipeline AND at least one non-trivial building block worth showing in detail. Use the panels system: panel (a) shows the overall architecture with the building block as a named box, panel (b) zooms into that building block's internals. Most good papers should produce 2-layer figures. This is the target — a reviewer should see both the forest and the trees.
-
-Choose 2-layer composition when the paper describes custom attention mechanisms, novel encoder/decoder blocks, specialized loss architectures, multi-stage training pipelines with distinct components, or any sub-module that has its own internal structure worth showing. If the abstract mentions a novel component by name, that component deserves its own panel.
+{
+  "title": "Example Architecture",
+  "caption": "An encoder-decoder with latent quantization.",
+  "nodes": [
+    {
+      "kind": "vbox", "gap": 20, "align": "center", "padding": 15,
+      "children": [
+        {
+          "kind": "hbox", "gap": 18, "align": "middle",
+          "children": [
+            {"kind": "waveform", "width": 90, "height": 24, "periods": 4, "amplitude": 10},
+            {"kind": "arrow", "length": 30},
+            {"kind": "trapezoid", "width": 60, "height": 80, "direction": "down", "top_width": 36, "label": "Encoder"},
+            {"kind": "arrow", "length": 30},
+            {"kind": "vector_block", "values": [0.72, -0.31, 0.55, 0.88], "direction": "horizontal", "cell_width": 32, "cell_height": 28, "colormap": "viridis", "show_values": true, "value_precision": 1, "label": "Latent z", "color_min": -0.70, "color_max": 0.90}
+          ]
+        },
+        {"kind": "arrow", "length": 25},
+        {
+          "kind": "hbox", "gap": 18, "align": "middle",
+          "children": [
+            {"kind": "matrix_grid", "values": [[0.71, 0.54], [-0.33, 0.45], [0.15, -0.51]], "cell_width": 32, "cell_height": 22, "colormap": "viridis", "show_values": true, "value_precision": 1, "label": "Codebook"},
+            {"kind": "arrow", "length": 30},
+            {"kind": "trapezoid", "width": 60, "height": 80, "direction": "up", "top_width": 36, "label": "Decoder"},
+            {"kind": "arrow", "length": 30},
+            {"kind": "waveform", "width": 90, "height": 24, "periods": 4, "amplitude": 10}
+          ]
+        }
+      ]
+    }
+  ]
+}
 
 ## Your Task
 
-Read the paper title and abstract. Identify the core architecture or method pipeline. Assess whether the paper warrants 1-layer or 2-layer composition. Produce a clean, readable diagram that a researcher would put in a paper. Focus on the main contribution — skip standard components like "Adam optimizer" or "cross-entropy loss" unless they are the paper's focus.`;
+Read the paper title and abstract. Identify the core architecture or method. Produce a clean, readable diagram using hbox/vbox layout containers. Focus on the main contribution — skip standard components like "Adam optimizer" or "cross-entropy loss" unless they are the paper's focus.`;
 
 const client = new Anthropic();
 
 export async function generateFigure(paper) {
-    const userPrompt = `Paper Title: ${paper.title}\n\nAbstract: ${paper.abstract}\n\nStyle: dark\n\nInclude a descriptive caption in the "caption" field.`;
+    const userPrompt = `Paper Title: ${paper.title}\n\nAbstract: ${paper.abstract}\n\nInclude a descriptive caption in the "caption" field.`;
 
     const startTime = Date.now();
 
@@ -171,6 +180,16 @@ export async function generateFigure(paper) {
             throw new Error('Failed to parse scene graph JSON from Claude response');
         }
     }
+
+    // Resolve hbox/vbox containers into flat positioned nodes
+    const isBoxNode = n => n.kind === 'hbox' || n.kind === 'vbox';
+    const hasBoxLayout = (sceneGraph.nodes || []).some(isBoxNode);
+    if (hasBoxLayout) {
+        sceneGraph = applyBoxLayout(sceneGraph, 'icml');
+    }
+
+    // Remove panels if Claude generated any (prompt says not to, but just in case)
+    delete sceneGraph.panels;
 
     const optimized = optimizeLayout(sceneGraph);
 
