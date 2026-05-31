@@ -113,6 +113,20 @@ function measureWaveform(node, style) {
     };
 }
 
+function measureLinePlot(node, style) {
+    return {
+        width: node.width || 250,
+        height: (node.height || 150) + labelHeightBottom(node, style),
+    };
+}
+
+function measureBarChart(node, style) {
+    return {
+        width: node.width || 200,
+        height: (node.height || 150) + labelHeightBottom(node, style),
+    };
+}
+
 function measureBracket(node) {
     if (node.direction === 'vertical') {
         return { width: 40, height: node.height || 150 };
@@ -132,6 +146,10 @@ function measureNode(node, style, parentDirection) {
             return measureMatrixGrid(node, style);
         case 'vector_block':
             return measureVectorBlock(node, style);
+        case 'line_plot':
+            return measureLinePlot(node, style);
+        case 'bar_chart':
+            return measureBarChart(node, style);
         case 'rect':
             return { width: node.width || 120, height: node.height || 50 };
         case 'trapezoid':

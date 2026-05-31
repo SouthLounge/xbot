@@ -126,6 +126,10 @@ export function getNodeBBox(node) {
             }
             return { x: node.x, y: node.y, w: vcw, h: vvals.length * vch + 20 };
         }
+        case 'line_plot':
+            return { x: node.x, y: node.y, w: node.width || 250, h: node.height || 150 };
+        case 'bar_chart':
+            return { x: node.x, y: node.y, w: node.width || 200, h: node.height || 150 };
         default:
             return null;
     }

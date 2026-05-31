@@ -998,6 +998,39 @@ function renderRepeatMarker(node, style) {
     }, `\u00d7${n}`);
 }
 
+// ---- Plot Utilities ----
+
+const PLOT_MARGIN = { top: 10, right: 15, bottom: 30, left: 45 };
+const SERIES_COLORS = ['#1a1a1a', '#2962ff', '#d32f2f', '#388e3c', '#f57c00', '#7b1fa2', '#00838f'];
+
+function niceNumber(val) {
+    if (Number.isInteger(val)) return String(val);
+    if (Math.abs(val) >= 100) return val.toFixed(0);
+    if (Math.abs(val) >= 10) return val.toFixed(1);
+    return val.toFixed(2);
+}
+
+function renderMarker(type, cx, cy, r, color) {
+    switch (type) {
+        case 'circle':
+            return svgEl('circle', { cx, cy, r, fill: color, stroke: 'none' });
+        case 'square':
+            return svgEl('rect', { x: cx - r, y: cy - r, width: r * 2, height: r * 2, fill: color, stroke: 'none' });
+        case 'triangle':
+            return svgEl('polygon', {
+                points: `${cx},${cy - r} ${cx - r},${cy + r} ${cx + r},${cy + r}`,
+                fill: color, stroke: 'none',
+            });
+        case 'diamond':
+            return svgEl('polygon', {
+                points: `${cx},${cy - r} ${cx + r},${cy} ${cx},${cy + r} ${cx - r},${cy}`,
+                fill: color, stroke: 'none',
+            });
+        default:
+            return '';
+    }
+}
+
 // ---- Colormap Utilities ----
 
 const VIRIDIS_STOPS = [
@@ -1149,6 +1182,323 @@ function renderVectorBlock(node, style) {
     return svgEl('g', {}, ...parts);
 }
 
+// ---- Line Plot Renderer ----
+
+function renderLinePlot(node, style) {
+    const x = node.x || 0;
+    const y = node.y || 0;
+    const w = node.width || 250;
+    const h = node.height || 150;
+    const series = node.series || [];
+
+    const ml = PLOT_MARGIN.left;
+    const mr = PLOT_MARGIN.right;
+    const mt = PLOT_MARGIN.top;
+    const mb = PLOT_MARGIN.bottom;
+    const pw = w - ml - mr;
+    const ph = h - mt - mb;
+
+    // Compute data ranges
+    let xMin, xMax, yMin, yMax;
+    if (node.x_range) {
+        [xMin, xMax] = node.x_range;
+    } else {
+        xMin = Infinity; xMax = -Infinity;
+        for (const s of series) {
+            for (const [dx] of (s.data || [])) {
+                xMin = Math.min(xMin, dx);
+                xMax = Math.max(xMax, dx);
+            }
+        }
+        if (!isFinite(xMin)) { xMin = 0; xMax = 1; }
+    }
+    if (node.y_range) {
+        [yMin, yMax] = node.y_range;
+    } else {
+        yMin = Infinity; yMax = -Infinity;
+        for (const s of series) {
+            for (const [, dy] of (s.data || [])) {
+                yMin = Math.min(yMin, dy);
+                yMax = Math.max(yMax, dy);
+            }
+        }
+        if (!isFinite(yMin)) { yMin = 0; yMax = 1; }
+    }
+
+    const mapX = (v) => x + ml + ((v - xMin) / (xMax - xMin || 1)) * pw;
+    const mapY = (v) => y + mt + ph - ((v - yMin) / (yMax - yMin || 1)) * ph;
+
+    const parts = [];
+
+    // Plot area border
+    parts.push(svgEl('rect', {
+        x: x + ml, y: y + mt, width: pw, height: ph,
+        fill: 'none', stroke: style.nodeStroke, 'stroke-width': 0.5,
+    }));
+
+    // Grid lines and tick labels
+    const xTicks = node.x_ticks || 5;
+    const yTicks = node.y_ticks || 5;
+
+    for (let i = 0; i <= yTicks; i++) {
+        const val = yMin + (yMax - yMin) * i / yTicks;
+        const py = mapY(val);
+        if (node.grid !== false) {
+            parts.push(svgEl('line', {
+                x1: x + ml, y1: py, x2: x + ml + pw, y2: py,
+                stroke: '#ddd', 'stroke-width': 0.5, 'stroke-dasharray': '3,3',
+            }));
+        }
+        parts.push(textEl('text', {
+            x: x + ml - 5, y: py + 3,
+            'text-anchor': 'end', 'font-family': style.monoFont,
+            'font-size': 8, fill: style.labelColor,
+        }, niceNumber(val)));
+    }
+
+    for (let i = 0; i <= xTicks; i++) {
+        const val = xMin + (xMax - xMin) * i / xTicks;
+        const px = mapX(val);
+        if (node.grid !== false && i > 0 && i < xTicks) {
+            parts.push(svgEl('line', {
+                x1: px, y1: y + mt, x2: px, y2: y + mt + ph,
+                stroke: '#ddd', 'stroke-width': 0.5, 'stroke-dasharray': '3,3',
+            }));
+        }
+        parts.push(textEl('text', {
+            x: px, y: y + mt + ph + 12,
+            'text-anchor': 'middle', 'font-family': style.monoFont,
+            'font-size': 8, fill: style.labelColor,
+        }, niceNumber(val)));
+    }
+
+    // Axis labels
+    if (node.x_label) {
+        parts.push(textEl('text', {
+            x: x + ml + pw / 2, y: y + h - 2,
+            'text-anchor': 'middle', 'font-family': style.fontFamily,
+            'font-size': 9, fill: style.textColor,
+        }, node.x_label));
+    }
+    if (node.y_label) {
+        parts.push(textEl('text', {
+            x: 0, y: 0,
+            transform: `translate(${x + 10},${y + mt + ph / 2}) rotate(-90)`,
+            'text-anchor': 'middle', 'font-family': style.fontFamily,
+            'font-size': 9, fill: style.textColor,
+        }, node.y_label));
+    }
+
+    // Data series
+    for (let si = 0; si < series.length; si++) {
+        const s = series[si];
+        const data = s.data || [];
+        const color = s.color || SERIES_COLORS[si % SERIES_COLORS.length];
+        const sw = s.stroke_width || 1.5;
+
+        if (data.length > 1) {
+            const pathPoints = data.map(([dx, dy]) => `${mapX(dx)},${mapY(dy)}`).join(' ');
+            parts.push(svgEl('polyline', {
+                points: pathPoints,
+                fill: 'none', stroke: color, 'stroke-width': sw,
+                'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+                'stroke-dasharray': s.dashed ? '5,3' : null,
+            }));
+        }
+
+        const marker = s.marker || 'none';
+        if (marker !== 'none') {
+            for (const [dx, dy] of data) {
+                parts.push(renderMarker(marker, mapX(dx), mapY(dy), 3, color));
+            }
+        }
+    }
+
+    // Legend
+    if (node.legend !== false && series.some(s => s.label)) {
+        const legendX = x + ml + pw - 5;
+        let legendY = y + mt + 12;
+        for (let si = 0; si < series.length; si++) {
+            const s = series[si];
+            if (!s.label) continue;
+            const color = s.color || SERIES_COLORS[si % SERIES_COLORS.length];
+            parts.push(svgEl('line', {
+                x1: legendX - 25, y1: legendY, x2: legendX - 5, y2: legendY,
+                stroke: color, 'stroke-width': 1.5,
+                'stroke-dasharray': s.dashed ? '4,2' : null,
+            }));
+            if (s.marker && s.marker !== 'none') {
+                parts.push(renderMarker(s.marker, legendX - 15, legendY, 2.5, color));
+            }
+            parts.push(textEl('text', {
+                x: legendX - 28, y: legendY + 3,
+                'text-anchor': 'end', 'font-family': style.fontFamily,
+                'font-size': 7, fill: style.textColor,
+            }, s.label));
+            legendY += 12;
+        }
+    }
+
+    // Label below
+    if (node.label) {
+        parts.push(textEl('text', {
+            x: x + w / 2, y: y + h + 14,
+            'text-anchor': 'middle', 'font-family': style.fontFamily,
+            'font-size': style.smallFontSize, fill: style.labelColor, 'font-weight': 'bold',
+        }, node.label));
+    }
+
+    return svgEl('g', { class: 'node-line-plot' }, ...parts);
+}
+
+// ---- Bar Chart Renderer ----
+
+function renderBarChart(node, style) {
+    const x = node.x || 0;
+    const y = node.y || 0;
+    const w = node.width || 200;
+    const h = node.height || 150;
+    const categories = node.categories || [];
+    const series = node.series || [];
+
+    const ml = PLOT_MARGIN.left;
+    const mr = PLOT_MARGIN.right;
+    const mt = PLOT_MARGIN.top;
+    const mb = PLOT_MARGIN.bottom;
+    const pw = w - ml - mr;
+    const ph = h - mt - mb;
+
+    // Y range
+    let yMin = 0, yMax;
+    if (node.y_range) {
+        [yMin, yMax] = node.y_range;
+    } else {
+        yMax = 0;
+        for (const s of series) {
+            for (const v of (s.values || [])) {
+                yMax = Math.max(yMax, v);
+            }
+        }
+        yMax = yMax * 1.1 || 1;
+    }
+
+    const mapY = (v) => y + mt + ph - ((v - yMin) / (yMax - yMin || 1)) * ph;
+
+    const parts = [];
+
+    // Grid lines and y-tick labels
+    const yTicks = node.y_ticks || 5;
+    for (let i = 0; i <= yTicks; i++) {
+        const val = yMin + (yMax - yMin) * i / yTicks;
+        const py = mapY(val);
+        if (node.grid !== false) {
+            parts.push(svgEl('line', {
+                x1: x + ml, y1: py, x2: x + ml + pw, y2: py,
+                stroke: '#ddd', 'stroke-width': 0.5, 'stroke-dasharray': '3,3',
+            }));
+        }
+        parts.push(textEl('text', {
+            x: x + ml - 5, y: py + 3,
+            'text-anchor': 'end', 'font-family': style.monoFont,
+            'font-size': 8, fill: style.labelColor,
+        }, niceNumber(val)));
+    }
+
+    // Axes
+    parts.push(svgEl('line', {
+        x1: x + ml, y1: y + mt, x2: x + ml, y2: y + mt + ph,
+        stroke: style.nodeStroke, 'stroke-width': 0.5,
+    }));
+    parts.push(svgEl('line', {
+        x1: x + ml, y1: y + mt + ph, x2: x + ml + pw, y2: y + mt + ph,
+        stroke: style.nodeStroke, 'stroke-width': 0.5,
+    }));
+
+    // Bars
+    const nCats = categories.length || 1;
+    const nSeries = series.length || 1;
+    const catWidth = pw / nCats;
+    const groupPad = catWidth * 0.15;
+    const groupWidth = catWidth - 2 * groupPad;
+    const barWidth = nSeries > 1 ? groupWidth / nSeries : groupWidth * 0.6;
+
+    for (let ci = 0; ci < nCats; ci++) {
+        const catCx = x + ml + ci * catWidth + catWidth / 2;
+        parts.push(textEl('text', {
+            x: catCx, y: y + mt + ph + 12,
+            'text-anchor': 'middle', 'font-family': style.fontFamily,
+            'font-size': 8, fill: style.labelColor,
+        }, categories[ci] || ''));
+
+        for (let si = 0; si < series.length; si++) {
+            const s = series[si];
+            const val = (s.values || [])[ci] || 0;
+            const color = s.color || SERIES_COLORS[si % SERIES_COLORS.length];
+
+            const barX = x + ml + ci * catWidth + groupPad +
+                (nSeries > 1 ? si * (groupWidth / nSeries) : (groupWidth - barWidth) / 2);
+            const barTop = mapY(val);
+            const barBot = mapY(yMin);
+            const barH = barBot - barTop;
+
+            parts.push(svgEl('rect', {
+                x: barX, y: barTop, width: barWidth, height: Math.max(0, barH),
+                fill: color, stroke: style.nodeStroke, 'stroke-width': 0.5, rx: 1,
+            }));
+
+            if (node.show_values) {
+                parts.push(textEl('text', {
+                    x: barX + barWidth / 2, y: barTop - 3,
+                    'text-anchor': 'middle', 'font-family': style.monoFont,
+                    'font-size': 7, fill: style.textColor,
+                }, niceNumber(val)));
+            }
+        }
+    }
+
+    // Y-axis label
+    if (node.y_label) {
+        parts.push(textEl('text', {
+            x: 0, y: 0,
+            transform: `translate(${x + 10},${y + mt + ph / 2}) rotate(-90)`,
+            'text-anchor': 'middle', 'font-family': style.fontFamily,
+            'font-size': 9, fill: style.textColor,
+        }, node.y_label));
+    }
+
+    // Label below
+    if (node.label) {
+        parts.push(textEl('text', {
+            x: x + w / 2, y: y + h + 14,
+            'text-anchor': 'middle', 'font-family': style.fontFamily,
+            'font-size': style.smallFontSize, fill: style.labelColor, 'font-weight': 'bold',
+        }, node.label));
+    }
+
+    // Legend (for multiple series)
+    if (node.legend !== false && nSeries > 1 && series.some(s => s.label)) {
+        const legendX = x + ml + pw - 5;
+        let legendY = y + mt + 12;
+        for (let si = 0; si < series.length; si++) {
+            const s = series[si];
+            if (!s.label) continue;
+            const color = s.color || SERIES_COLORS[si % SERIES_COLORS.length];
+            parts.push(svgEl('rect', {
+                x: legendX - 20, y: legendY - 4, width: 12, height: 8,
+                fill: color, stroke: 'none',
+            }));
+            parts.push(textEl('text', {
+                x: legendX - 23, y: legendY + 3,
+                'text-anchor': 'end', 'font-family': style.fontFamily,
+                'font-size': 7, fill: style.textColor,
+            }, s.label));
+            legendY += 12;
+        }
+    }
+
+    return svgEl('g', { class: 'node-bar-chart' }, ...parts);
+}
+
 // ---- Render Dispatch Table ----
 
 const RENDERERS = {
@@ -1169,6 +1519,8 @@ const RENDERERS = {
     repeat_marker: renderRepeatMarker,
     matrix_grid: renderMatrixGrid,
     vector_block: renderVectorBlock,
+    line_plot: renderLinePlot,
+    bar_chart: renderBarChart,
 };
 
 // ---- Composite Rendering ----

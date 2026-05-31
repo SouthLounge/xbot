@@ -76,6 +76,19 @@ The top-level "nodes" array should contain ONE root vbox (or hbox) that holds th
 - direction: "vertical" or "horizontal". label_position: "top" or "bottom".
 - Use for: embeddings, latent vectors, softmax outputs, binary masks, feature vectors.
 
+### line_plot
+{ "kind": "line_plot", "width": 250, "height": 150, "x_label": "Epoch", "y_label": "SNR (dB)", "x_range": [0, 100], "y_range": [0, 20], "x_ticks": 5, "y_ticks": 5, "grid": true, "series": [{"data": [[0,5],[20,12],[40,16],[60,18],[80,18.5],[100,18.8]], "label": "Model A", "color": "#1a1a1a", "marker": "circle"}, {"data": [[0,3],[20,9],[40,13],[60,15],[80,16],[100,16.5]], "label": "Model B", "color": "#2962ff", "dashed": true, "marker": "square"}], "label": "Training Curves" }
+- Axes, grid, multiple series with colors/markers/dashes, legend auto-shown.
+- series[].marker: "circle" | "square" | "triangle" | "diamond" | "none".
+- x_range/y_range: optional, auto-computed from data if omitted.
+- Use for: training curves, ablation comparisons, scalability plots, convergence analysis.
+
+### bar_chart
+{ "kind": "bar_chart", "width": 200, "height": 150, "categories": ["WaveNet", "K-Net", "Ours"], "y_label": "Params (M)", "y_range": [0, 25], "y_ticks": 5, "grid": true, "series": [{"values": [20, 1.5, 0.9], "label": "Params", "color": "#555555"}], "show_values": true, "label": "Model Complexity" }
+- Grouped bars for categorical comparisons. Multiple series auto-group side by side.
+- show_values: display value labels on top of each bar.
+- Use for: model size comparisons, metric comparisons across methods, ablation bar charts.
+
 ### arrow
 { "kind": "arrow", "length": 30 }
 - Inside containers, use "length" only. The engine generates points automatically.
@@ -94,11 +107,14 @@ The top-level "nodes" array should contain ONE root vbox (or hbox) that holds th
 1. Use 8-25 leaf nodes total. Be selective — show the KEY architecture, not every detail.
 2. Use hbox/vbox containers for ALL layout. Do NOT manually specify x,y coordinates.
 3. Choose the right visual metaphor for the paper:
+   - Training curves, convergence, scalability → line_plot with multiple series
+   - Model comparisons, ablations with numeric results → bar_chart
    - Quantization, attention, embeddings, codebooks → matrix_grid + vector_block with colormaps
    - Encoder-decoder, pipelines → trapezoid + rect inside hbox
    - Signal processing, audio, speech → waveform + vector_block
    - Multi-path architectures → nested hbox inside vbox
    - Default: rect/arrow flowchart wrapped in vbox
+   - Combine plot + architecture: use hbox to place a line_plot or bar_chart next to a pipeline diagram
 4. Use trapezoids for encoder/decoder pairs (down=encoder, up=decoder).
 5. Use stacked_blocks for multi-layer modules (transformer blocks, ResNet stages).
 6. Use tensor_blocks for feature maps and data tensors — they add visual depth.
