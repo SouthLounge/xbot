@@ -107,14 +107,15 @@ The top-level "nodes" array should contain ONE root vbox (or hbox) that holds th
 1. Use 8-25 leaf nodes total. Be selective — show the KEY architecture, not every detail.
 2. Use hbox/vbox containers for ALL layout. Do NOT manually specify x,y coordinates.
 3. Choose the right visual metaphor for the paper:
-   - Training curves, convergence, scalability → line_plot with multiple series
-   - Model comparisons, ablations with numeric results → bar_chart
+   - Pruning, sparsity, weight analysis → matrix_grid showing sparse/dense weights + architecture flow
    - Quantization, attention, embeddings, codebooks → matrix_grid + vector_block with colormaps
    - Encoder-decoder, pipelines → trapezoid + rect inside hbox
    - Signal processing, audio, speech → waveform + vector_block
    - Multi-path architectures → nested hbox inside vbox
+   - Training curves, convergence, scalability → line_plot with multiple series
+   - Model size/speed comparisons → bar_chart (use alongside architecture, not as the main figure)
    - Default: rect/arrow flowchart wrapped in vbox
-   - Combine plot + architecture: use hbox to place a line_plot or bar_chart next to a pipeline diagram
+   - You can MIX primitives: e.g. architecture diagram with a matrix_grid showing weights AND a bar_chart for results, all in one figure via hbox/vbox
 4. Use trapezoids for encoder/decoder pairs (down=encoder, up=decoder).
 5. Use stacked_blocks for multi-layer modules (transformer blocks, ResNet stages).
 6. Use tensor_blocks for feature maps and data tensors — they add visual depth.
